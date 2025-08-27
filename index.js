@@ -8,6 +8,7 @@ import ngrok from 'ngrok';
 import { setTimeout as wait } from 'timers/promises';
 import { fileURLToPath } from 'url';
 
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /* ===================== ENV & CONSTANTS ===================== */
@@ -18,11 +19,12 @@ const NGROK_AUTH_TOKEN = process.env.NGROK_AUTH_TOKEN;
 const PAGE_ID = process.env.PAGE_ID;               // FB Page ID
 const IG_USER_ID = process.env.IG_USER_ID;         // IG Business Account ID (connected to Page)
 const ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+const INSTAGRAM_ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN.trim();
 
 const GRAPH = 'https://graph.facebook.com/v20.0';
-
+const GRAPH_IG = 'https://graph.instagram.com/v23.0';
 const DM_SENDER_USERNAME_TO_ALLOW = 'know_niraj';  // only process messages from this sender
-const DM_POLL_INTERVAL_MS = 30_000;                // 30 sec
+const DM_POLL_INTERVAL_MS = 10 * 1000;               // 10 sec
 const UPLOAD_COOLDOWN_MS = 60 * 60 * 1000;         // 1 hour cooldown after each upload
 
 /* ===================== UTILITIES ===================== */
@@ -38,11 +40,6 @@ function safeBaseFilename(str, max = 80) {
   return s.slice(0, max) || `file_${Date.now()}`;
 }
 
-function isInstagramUrl(text) {
-  if (!text) return false;
-  return /https?:\/\/(www\.)?instagram\.com\/[^\s]+/i.test(text);
-}
-
 function extractInstagramUrls(text) {
   if (!text) return [];
   return [...text.matchAll(/https?:\/\/(?:www\.)?instagram\.com\/[^\s)]+/gi)].map(m => m[0]);
@@ -56,13 +53,6 @@ async function fetchJson(url) {
     throw new Error(`HTTP ${res.status}: ${msg}`);
   }
   return data;
-}
-
-async function downloadToFile(fileUrl, destPath) {
-  const res = await fetch(fileUrl);
-  if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
-  const buf = await res.buffer();
-  fs.writeFileSync(destPath, buf);
 }
 
 /* ===================== SERVER + NGROK ===================== */
@@ -194,15 +184,20 @@ const processedMessageIds = new Set();
  * List conversations for the Page with platform=instagram
  */
 async function listIgConversations() {
-  const url = `${GRAPH}/${PAGE_ID}/conversations?platform=instagram&access_token=${ACCESS_TOKEN}`;
-  return await fetchJson(url);
+  const url = `${GRAPH_IG}/me/conversations?platform=instagram&access_token=${INSTAGRAM_ACCESS_TOKEN}`;
+
+  const response = await fetch(url);
+
+  const data = await response.json();
+
+  return data;
 }
 
 /**
  * Expand a conversation -> message IDs
  */
 async function getConversationMessages(conversationId) {
-  const url = `${GRAPH}/${conversationId}?fields=messages&access_token=${ACCESS_TOKEN}`;
+  const url = `${GRAPH_IG}/${conversationId}?fields=messages&access_token=${INSTAGRAM_ACCESS_TOKEN}`;
   return await fetchJson(url);
 }
 
@@ -210,7 +205,7 @@ async function getConversationMessages(conversationId) {
  * Fetch message details by message ID
  */
 async function getMessage(messageId) {
-  const url = `${GRAPH}/${messageId}?fields=message,created_time,from,to&access_token=${ACCESS_TOKEN}`;
+  const url = `${GRAPH_IG}/${messageId}?fields=message,attachments,shares,created_time,from,to&access_token=${INSTAGRAM_ACCESS_TOKEN}`;
   return await fetchJson(url);
 }
 
@@ -221,13 +216,13 @@ async function getMessage(messageId) {
  */
 async function resolveInstagramMediaUrls(instagramUrl) {
   // 1) oEmbed → media_id
-  const oembedUrl = `${GRAPH}/instagram_oembed?url=${encodeURIComponent(instagramUrl)}&access_token=${ACCESS_TOKEN}`;
+  const oembedUrl = `${GRAPH_IG}/instagram_oembed?url=${encodeURIComponent(instagramUrl)}&access_token=${INSTAGRAM_ACCESS_TOKEN}`;
   const oembed = await fetchJson(oembedUrl);
   if (!oembed.media_id) throw new Error('No media_id from oEmbed');
 
   // 2) media info
   const fields = 'id,media_type,media_url,permalink,caption,children{media_type,media_url,id}';
-  const mediaUrl = `${GRAPH}/${oembed.media_id}?fields=${encodeURIComponent(fields)}&access_token=${ACCESS_TOKEN}`;
+  const mediaUrl = `${GRAPH_IG}/${oembed.media_id}?fields=${encodeURIComponent(fields)}&access_token=${INSTAGRAM_ACCESS_TOKEN}`;
   const media = await fetchJson(mediaUrl);
 
   const base = safeBaseFilename(media.caption || media.id || 'insta');
@@ -248,18 +243,27 @@ async function resolveInstagramMediaUrls(instagramUrl) {
   return out;
 }
 
-/**
- * Poller: read new DMs, filter sender, extract URLs, download reels to WATCH_FOLDER
- */
+async function downloadToFile(url, dest) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+
+  const fileStream = fs.createWriteStream(dest);
+  await new Promise((resolve, reject) => {
+    res.body.pipe(fileStream);
+    res.body.on("error", reject);
+    fileStream.on("finish", resolve);
+  });
+}
+
 async function pollMessagesOnce() {
   try {
     const convs = await listIgConversations();
-
     if (!convs?.data?.length) return;
 
     for (const conv of convs.data) {
       const msgs = await getConversationMessages(conv.id);
       const list = msgs?.messages?.data || [];
+
       for (const m of list) {
         if (processedMessageIds.has(m.id)) continue;
 
@@ -267,19 +271,42 @@ async function pollMessagesOnce() {
         processedMessageIds.add(m.id);
 
         const created = new Date(details.created_time).getTime();
-        if (created <= lastCheck) continue;
+        if (created <= lastCheck) {
+          console.log("⏪ Skipping old message");
+          continue;
+        }
 
-        const sender = (details.from?.username || details.from?.name || '').toLowerCase();
-        const text = details.message || '';
+        const sender = (details.from?.username || details.from?.name || "").toLowerCase();
+        console.log(`🆕 New message from ${sender} at ${details.created_time}`);
 
-        if (sender !== DM_SENDER_USERNAME_TO_ALLOW) continue;
-        if (!isInstagramUrl(text)) continue;
+        if (sender !== DM_SENDER_USERNAME_TO_ALLOW) {
+          console.log(`⛔ Ignoring message from ${sender}`);
+          continue;
+        }
 
+        // 1️⃣ Prefer attached media link from Graph API shares
+        if (details.shares?.data?.length) {
+          for (const share of details.shares.data) {
+            const mediaUrl = share.link;
+            console.log(`📎 Found shared media: ${mediaUrl}`);
+
+            const filename = `ig_share_${Date.now()}.mp4`;
+            const dest = path.join(WATCH_FOLDER, filename);
+
+            try {
+              await downloadToFile(mediaUrl, dest);
+              console.log(`📥 Saved shared media: ${dest}`);
+            } catch (e) {
+              console.error(`❌ Failed to download shared media: ${e.message}`);
+            }
+          }
+        }
+
+        // 2️⃣ If you still want to handle text-based IG post links (optional)
+        const text = details.message || "";
         const igUrls = extractInstagramUrls(text);
         for (const igUrl of igUrls) {
           console.log(`🔗 DM from ${sender}: ${igUrl}`);
-
-          // Resolve -> downloadable video URLs
           let files = [];
           try {
             files = await resolveInstagramMediaUrls(igUrl);
@@ -289,11 +316,10 @@ async function pollMessagesOnce() {
           }
 
           if (!files.length) {
-            console.log('ℹ️ No downloadable video media found in that post.');
+            console.log("ℹ️ No downloadable video media found in that post.");
             continue;
           }
 
-          // Download each video to WATCH_FOLDER (triggers upload watcher)
           for (const f of files) {
             const filename = `${f.filenameBase}_${Date.now()}.mp4`;
             const dest = path.join(WATCH_FOLDER, filename);
@@ -322,8 +348,8 @@ function startDmPoller() {
 /* ===================== MAIN ===================== */
 
 (async function main() {
-  if (!ACCESS_TOKEN || !PAGE_ID || !IG_USER_ID) {
-    console.error('❌ Missing env: PAGE_ID, IG_USER_ID, PAGE_ACCESS_TOKEN are required.');
+  if (!ACCESS_TOKEN || !PAGE_ID || !IG_USER_ID || !INSTAGRAM_ACCESS_TOKEN) {
+    console.error('❌ Missing env: PAGE_ID, IG_USER_ID, PAGE_ACCESS_TOKEN, INSTAGRAM_ACCESS_TOKEN are required.');
     process.exit(1);
   }
 
