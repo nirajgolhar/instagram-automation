@@ -4,10 +4,9 @@ import path from 'path';
 import express from 'express';
 import chokidar from 'chokidar';
 import fetch from 'node-fetch';
-import ngrok from 'ngrok';
 import { setTimeout as wait } from 'timers/promises';
 import { fileURLToPath } from 'url';
-
+import ngrok from '@ngrok/ngrok';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -70,11 +69,14 @@ async function startServer() {
     });
   });
 
-  publicBaseUrl = await ngrok.connect({
-    addr: PORT,
-    authtoken: NGROK_AUTH_TOKEN,
-  });
+  await ngrok.kill(); // prevent duplicate tunnel
 
+const listener = await ngrok.connect({
+  addr: PORT,
+  authtoken: process.env.NGROK_AUTH_TOKEN,
+});
+
+ publicBaseUrl = listener.url();
   console.log(`Public video URL base: ${publicBaseUrl}/videos/`);
 }
 
@@ -357,3 +359,43 @@ function startDmPoller() {
   startFileWatcher();
   startDmPoller();
 })();
+
+app.use(express.json());
+
+// 1️⃣ Verification endpoint (GET)
+app.get('/webhook', (req, res) => {
+  const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('Webhook verified');
+    res.status(200).send(challenge);
+  } else {
+    res.sendStatus(403);
+  }
+});
+
+// 2️⃣ Event receiver (POST)
+app.post('/webhook', async (req, res) => {
+  try {
+    const entry = req.body.entry?.[0];
+    const messaging = entry?.messaging?.[0];
+
+    if (!messaging) return res.sendStatus(200);
+
+    const senderId = messaging.sender.id;
+    const messageText = messaging.message?.text;
+
+    console.log("New DM:", messageText);
+
+    // 👉 Trigger upload logic here
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error(err);
+    res.sendStatus(200);
+  }
+});
