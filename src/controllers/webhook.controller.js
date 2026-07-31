@@ -1,7 +1,18 @@
+import crypto from "crypto";
 import { config } from "../config/env.js";
 import { downloadInstagramVideo } from "../services/downloader.service.js";
 
 const processedMessages = new Set();
+
+function validateSignature(req) {
+  const signature = req.headers["x-hub-signature-256"];
+  if (!signature || !config.appSecret) return false;
+  const expected = "sha256=" + crypto
+    .createHmac("sha256", config.appSecret)
+    .update(req.rawBody)
+    .digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
 
 export const verifyWebhook = (req, res) => {
   const mode = req.query["hub.mode"];
@@ -17,6 +28,11 @@ export const verifyWebhook = (req, res) => {
 };
 
 export const handleWebhook = async (req, res) => {
+  if (!validateSignature(req)) {
+    console.warn("⛔ Invalid signature - request rejected");
+    return res.sendStatus(403);
+  }
+
   try {
     const messaging = req.body.entry?.[0]?.messaging?.[0];
 

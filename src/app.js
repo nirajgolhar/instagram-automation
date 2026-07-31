@@ -7,7 +7,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 
-app.use(express.json());
+// Capture raw body for Meta signature validation
+app.use(express.json({
+  verify: (req, _res, buf) => { req.rawBody = buf; }
+}));
 app.use('/videos', express.static(path.join(__dirname, '../downloads')));
 app.use('/webhook', webhookRoutes);
 
