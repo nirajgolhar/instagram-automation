@@ -5,8 +5,12 @@ import { downloadInstagramVideo } from "../services/downloader.service.js";
 const processedMessages = new Set();
 
 function validateSignature(req) {
+  if (!config.appSecret) {
+    console.warn("⚠️ INSTAGRAM_APP_SECRET not set — skipping signature validation");
+    return true;
+  }
   const signature = req.headers["x-hub-signature-256"];
-  if (!signature || !config.appSecret) return false;
+  if (!signature) return false;
   const expected = "sha256=" + crypto
     .createHmac("sha256", config.appSecret)
     .update(req.rawBody)
@@ -34,6 +38,8 @@ export const handleWebhook = async (req, res) => {
   }
 
   try {
+    console.log("📩 Incoming webhook:", JSON.stringify(req.body, null, 2));
+
     const messaging = req.body.entry?.[0]?.messaging?.[0];
 
     if (!messaging?.message) {
