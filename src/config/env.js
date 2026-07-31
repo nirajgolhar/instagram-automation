@@ -7,4 +7,5 @@ export const config = {
   igUserId: process.env.IG_USER_ID,
   pageAccessToken: process.env.PAGE_ACCESS_TOKEN,
   igAccessToken: process.env.INSTAGRAM_ACCESS_TOKEN,
+  publicUrl: process.env.PUBLIC_URL,
 };

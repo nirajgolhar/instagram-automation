@@ -266,7 +266,8 @@ async function ensureLocalYtDlpBinary() {
 
   await mkdir(binDir, { recursive: true });
 
-  const downloadUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
+  const binaryName = process.platform === "darwin" ? "yt-dlp_macos" : "yt-dlp_linux";
+  const downloadUrl = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${binaryName}`;
   const res = await fetch(downloadUrl, { redirect: "follow" });
 
   if (!res.ok) {
