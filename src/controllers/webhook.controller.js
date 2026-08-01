@@ -10,12 +10,23 @@ function validateSignature(req) {
     return true;
   }
   const signature = req.headers["x-hub-signature-256"];
-  if (!signature) return false;
+  if (!signature) {
+    console.warn("⚠️ No X-Hub-Signature-256 header present");
+    return false;
+  }
   const expected = "sha256=" + crypto
     .createHmac("sha256", config.appSecret)
     .update(req.rawBody)
     .digest("hex");
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  console.log("🔐 Signature check — received:", signature, "expected:", expected);
+  try {
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, expBuf);
+  } catch {
+    return false;
+  }
 }
 
 export const verifyWebhook = (req, res) => {
