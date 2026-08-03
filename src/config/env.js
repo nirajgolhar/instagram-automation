@@ -8,5 +8,5 @@ export const config = {
   pageAccessToken: process.env.PAGE_ACCESS_TOKEN,
   igAccessToken: process.env.INSTAGRAM_ACCESS_TOKEN,
   publicUrl: process.env.PUBLIC_URL,
-  appSecret: process.env.INSTAGRAM_APP_SECRET,
+  appSecret: (process.env.APP_SECRET || process.env.INSTAGRAM_APP_SECRET || "").trim(),
 };

@@ -9,6 +9,10 @@ function validateSignature(req) {
     console.warn("⚠️ INSTAGRAM_APP_SECRET not set — skipping signature validation");
     return true;
   }
+  if (!req.rawBody) {
+    console.warn("⚠️ Raw body missing for signature validation");
+    return false;
+  }
   const signature = req.headers["x-hub-signature-256"];
   if (!signature) {
     console.warn("⚠️ No X-Hub-Signature-256 header present");
