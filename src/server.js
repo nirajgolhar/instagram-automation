@@ -22,6 +22,7 @@ async function start() {
 
   console.log(`🌍 Public URL: ${PUBLIC_URL}`);
   console.log(`👉 Webhook URL: ${PUBLIC_URL}/webhook`);
+  console.log(`🧪 Test URL: ${PUBLIC_URL}/test-log`);
 }
 
 start();

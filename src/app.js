@@ -11,6 +11,26 @@ const app = express();
 app.use(express.json({
   verify: (req, _res, buf) => { req.rawBody = buf; }
 }));
+
+app.all('/test-log', (req, res) => {
+  console.log('🧪 Test route hit');
+  console.log('➡️ Method:', req.method);
+  console.log('➡️ Path:', req.originalUrl);
+  console.log('➡️ Query:', JSON.stringify(req.query));
+  console.log('➡️ Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('➡️ Body:', JSON.stringify(req.body, null, 2));
+
+  return res.status(200).json({
+    ok: true,
+    message: 'Test route received your request. Check terminal logs.',
+    method: req.method,
+    path: req.originalUrl,
+    query: req.query,
+    body: req.body || null,
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.use('/videos', express.static(path.join(__dirname, '../downloads')));
 app.use('/webhook', webhookRoutes);
 
